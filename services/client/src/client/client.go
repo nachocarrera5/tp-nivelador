@@ -3,6 +3,9 @@ package client
 import (
 	"net"
 	"time"
+	"bufio"
+	"os"
+	"errors"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
@@ -12,13 +15,13 @@ const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
 
 const ECHO_CLIENT_BUFFER_SIZE = 512
-const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
 
 type ClientConfig struct {
 	ServerHost string
 	ServerPort string
 	AgencyId   string
+	InputFile string
+	OutputFile string
 }
 
 type Client struct {
@@ -59,34 +62,89 @@ func connectToServer(host, port string) (net.Conn, error) {
 }
 
 func (client *Client) Run() error {
-	const mainAction = "test-echo-server"
+	const mainAction = "input-read-and-output-write"
 	defer client.conn.Close()
 
-	for messageId := range ECHO_CLIENT_MESSAGE_AMOUNT {
-		messageArgs := []any{"agency-id", client.config.AgencyId, "message-id", messageId}
-		logger.Info(mainAction, logger.InProgress, messageArgs...)
-
-		clientMessage := client.config.AgencyId
-
-		if err := safe_socket.SendAll(client.conn, []byte(clientMessage)); err != nil {
-			logger.Error("send-message", logger.Fail, messageArgs...)
-			return err
-		}
-
-		responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
-		if err != nil {
-			logger.Error("recv-response", logger.Fail, messageArgs...)
-			return err
-		}
-
-		if string(responseBuffer) != clientMessage {
-			logger.Error("check-response", logger.Fail, messageArgs...)
-			return err
-		}
-
-		time.Sleep(ECHO_CLIENT_MESSAGE_DELAY_MS * time.Millisecond)
+	inputFile, err := os.Open(client.config.InputFile)
+	if err != nil {
+		return err
 	}
-	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
+
+	// Con defer me aseguro que el archivo se cierre cuando termine Run
+	defer inputFile.Close()
+
+	outputFile, err := os.Create(client.config.OutputFile)
+	if err != nil{
+		return err
+	}
+	defer outputFile.Close()
+
+	scanner := bufio.NewScanner(inputFile)
+	writer := bufio.NewWriter(outputFile)
+	messageId := 0
+
+	// loop de lectura
+
+	for scanner.Scan() {
+
+		clientMessage := scanner.Text()
+
+		if clientMessage == "" {
+			continue
+		}
+
+		logger.Info(
+			mainAction,
+			logger.InProgress,
+			"agency-id", client.config.AgencyId,
+			"message-id", messageId,
+		)
+
+		sendErr := safe_socket.SendAll(client.conn, []byte(clientMessage))
+		if sendErr != nil {
+			return sendErr
+		}
+
+		response, recvErr := safe_socket.RecvAll(client.conn,ECHO_CLIENT_BUFFER_SIZE)
+		if recvErr != nil {
+			return recvErr
+		}
+
+		// check echo server
+		if string(response) != clientMessage {
+			return errors.New("server response does not match sent message")
+		}
+
+		responseLine := string(response) + "\n"
+
+		written, writeErr := writer.WriteString(responseLine)
+		if writeErr != nil {
+			return writeErr
+		}
+
+		if written != len(responseLine) {
+			return errors.New("written output missing some bytes")
+		}
+
+		messageId++
+	}
+
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		return scanErr
+	}
+
+	flushErr := writer.Flush()
+	if flushErr != nil {
+		return flushErr
+	}
+
+	logger.Info(
+		mainAction,
+		logger.Success,
+		"agency-id", client.config.AgencyId,
+		"messages-amount", messageId,
+	)
 
 	return nil
 }
