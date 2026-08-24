@@ -4,7 +4,7 @@ DOCKER_FILE_PATH ?= docker-compose.yaml
 
 up:
 	mkdir -p output
-	rm ./output/* -f
+	rm -f ./output/*
 	COMPOSE_HTTP_TIMEOUT=300 docker compose -f $(DOCKER_FILE_PATH) up --build --remove-orphans --detach
 .PHONY: up
 
