@@ -8,13 +8,11 @@ import (
 	"errors"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
-	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
 
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
-
-const ECHO_CLIENT_BUFFER_SIZE = 512
 
 type ClientConfig struct {
 	ServerHost string
@@ -61,8 +59,82 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
+func (client *Client) sendBet(bet string) error {
+	payload := []byte(client.config.AgencyId + "," + bet)
+	message := protocol.Message{
+		Type:    protocol.TypeBet,
+		Payload: payload,
+	}
+
+	err := protocol.SendMessage(client.conn, message)
+	if err != nil {
+		return err
+	}
+
+	response, err := protocol.RecvMessage(client.conn)
+	if err != nil {
+		return err
+	}
+	
+	if response.Type == protocol.TypeError {
+		return errors.New(string(response.Payload))
+	}
+
+	if response.Type != protocol.TypeAck {
+		return errors.New("unexpected response type: " + string(response.Type))
+	}
+
+	return nil
+}
+
+func (client *Client) sendFinish() error {
+	message := protocol.Message{
+		Type:    protocol.TypeFinish,
+		Payload: []byte(client.config.AgencyId),
+	}
+
+	return protocol.SendMessage(client.conn, message)
+
+}
+
+func (client *Client) recvWinners(writer *bufio.Writer) error{
+	finished := false
+
+	for !finished {
+		message, err := protocol.RecvMessage(client.conn)
+		if err != nil {
+			logger.Error("recv-winners", logger.Fail, "err", err)
+			return err
+		}
+
+		switch message.Type {
+
+		case protocol.TypeWinner:
+			winner := string(message.Payload) + "\n"
+			written, err := writer.WriteString(winner)
+			if err != nil {
+				return err
+			}
+			if written != len(winner) {
+				return errors.New("winner message missing bytes")
+			}
+
+		case protocol.TypeEnd:
+			finished = true
+
+		case protocol.TypeError:
+			return errors.New(string(message.Payload))
+			
+		default:
+			return errors.New("unexpected message type: " + string(message.Type))
+		}
+	}
+
+	return nil
+}
+
 func (client *Client) Run() error {
-	const mainAction = "input-read-and-output-write"
+	const mainAction = "bets-and-winners"
 	defer client.conn.Close()
 
 	inputFile, err := os.Open(client.config.InputFile)
@@ -87,9 +159,9 @@ func (client *Client) Run() error {
 
 	for scanner.Scan() {
 
-		clientMessage := scanner.Text()
+		bet := scanner.Text()
 
-		if clientMessage == "" {
+		if bet == "" {
 			continue
 		}
 
@@ -100,30 +172,9 @@ func (client *Client) Run() error {
 			"message-id", messageId,
 		)
 
-		sendErr := safe_socket.SendAll(client.conn, []byte(clientMessage))
-		if sendErr != nil {
-			return sendErr
-		}
-
-		response, recvErr := safe_socket.RecvAll(client.conn,ECHO_CLIENT_BUFFER_SIZE)
-		if recvErr != nil {
-			return recvErr
-		}
-
-		// check echo server
-		if string(response) != clientMessage {
-			return errors.New("server response does not match sent message")
-		}
-
-		responseLine := string(response) + "\n"
-
-		written, writeErr := writer.WriteString(responseLine)
-		if writeErr != nil {
-			return writeErr
-		}
-
-		if written != len(responseLine) {
-			return errors.New("written output missing some bytes")
+		err := client.sendBet(bet)
+		if err != nil {
+			return err
 		}
 
 		messageId++
@@ -132,6 +183,16 @@ func (client *Client) Run() error {
 	scanErr := scanner.Err()
 	if scanErr != nil {
 		return scanErr
+	}
+
+	finishErr := client.sendFinish()
+	if finishErr != nil {
+		return finishErr
+	}
+
+	recvWinnErr := client.recvWinners(writer)
+	if recvWinnErr != nil {
+		return recvWinnErr
 	}
 
 	flushErr := writer.Flush()
