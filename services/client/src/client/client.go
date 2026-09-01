@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"os"
 	"errors"
+	"strings"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
@@ -20,6 +21,7 @@ type ClientConfig struct {
 	AgencyId   string
 	InputFile string
 	OutputFile string
+	BatchSize int
 }
 
 type Client struct {
@@ -59,8 +61,17 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
-func (client *Client) sendBet(bet string) error {
-	payload := []byte(client.config.AgencyId + "," + bet)
+func (client *Client) sendBets(bets []string) error {
+
+	betsPayload := make([]string, 0, len(bets))
+	for _, bet := range bets {
+		singleBetPayload := client.config.AgencyId + "," + bet
+		betsPayload = append(betsPayload, singleBetPayload)
+	}
+
+	payloadString := strings.Join(betsPayload, "\n")
+	payload := []byte(payloadString)
+
 	message := protocol.Message{
 		Type:    protocol.TypeBet,
 		Payload: payload,
@@ -153,6 +164,7 @@ func (client *Client) Run() error {
 
 	scanner := bufio.NewScanner(inputFile)
 	writer := bufio.NewWriter(outputFile)
+	batch := make([]string, 0, client.config.BatchSize)
 	messageId := 0
 
 	// loop de lectura
@@ -165,6 +177,12 @@ func (client *Client) Run() error {
 			continue
 		}
 
+		batch = append(batch, bet)
+
+		if len(batch) < client.config.BatchSize {
+			continue
+		}
+
 		logger.Info(
 			mainAction,
 			logger.InProgress,
@@ -172,10 +190,11 @@ func (client *Client) Run() error {
 			"message-id", messageId,
 		)
 
-		err := client.sendBet(bet)
+		err := client.sendBets(batch)
 		if err != nil {
 			return err
 		}
+		batch = batch[:0] // limpio el batch
 
 		messageId++
 	}
@@ -183,6 +202,23 @@ func (client *Client) Run() error {
 	scanErr := scanner.Err()
 	if scanErr != nil {
 		return scanErr
+	}
+
+	// si el numero de apuestas no es multiplo del batch size, envio el batch restante
+	if len(batch) > 0 {
+		logger.Info(
+			mainAction,
+			logger.InProgress,
+			"agency-id", client.config.AgencyId,
+			"message-id", messageId,
+		)
+
+		err := client.sendBets(batch)
+		if err != nil {
+			return err
+		}
+
+		messageId++
 	}
 
 	finishErr := client.sendFinish()
@@ -204,7 +240,7 @@ func (client *Client) Run() error {
 		mainAction,
 		logger.Success,
 		"agency-id", client.config.AgencyId,
-		"messages-amount", messageId,
+		"batches-amount", messageId,
 	)
 
 	return nil

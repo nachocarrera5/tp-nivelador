@@ -20,6 +20,20 @@ def deserialize_bet(payload: bytes) -> Bet:
 
     return Bet(agency_id, first_name, last_name, document, birthdate, number)
 
+def deserialize_bets(payload: bytes) -> list[Bet]:
+    bets = []
+
+    bet_payloads = payload.split(b"\n")
+
+    for line in bet_payloads:
+        if not line:
+            continue
+
+        bet = deserialize_bet(line)
+        bets.append(bet)
+
+    return bets
+
 def serialize_winner(bet: Bet) -> bytes:
     return f"{bet.first_name},{bet.last_name},{bet.document:08d},{bet.birthdate},{bet.number}".encode()
 
@@ -34,17 +48,25 @@ class Server:
 
         self.lottery = Lottery(_LOTTERY_STORAGE_PATH)
 
-    def _handle_bet(self, payload: bytes, current_agency_id):
-        bet = deserialize_bet(payload)
+    def _handle_bets(self, payload: bytes, current_agency_id):
+        bets = deserialize_bets(payload)
 
-        if bet.agency_id != current_agency_id and current_agency_id is not None:
-            raise ValueError(
-                f"Invalid agency id {bet.agency_id}, expected {current_agency_id}"
-            )
+        if len(bets) == 0:
+            raise ValueError("no bets received")
 
-        self.lottery.store_bets([bet])
+        agency_id = current_agency_id
 
-        return bet.agency_id
+        for bet in bets:
+            if agency_id is None:
+                agency_id = bet.agency_id
+            elif bet.agency_id != agency_id:
+                raise ValueError(
+                    f"Invalid agency id {bet.agency_id}, expected {agency_id}"
+                )
+
+        self.lottery.store_bets(bets)
+
+        return bets[0].agency_id
 
     def _send_winners(self, client_socket, agency_id: int):
         for bet in self.lottery.load_bets():
@@ -75,7 +97,7 @@ class Server:
                     client_message = protocol.recv_message(client_socket)
 
                     if client_message.type == protocol.TYPE_BET:
-                        agency_id = self._handle_bet(client_message.payload, agency_id)
+                        agency_id = self._handle_bets(client_message.payload, agency_id)
                         message_amount += 1
                         ack_message = protocol.Message(protocol.TYPE_ACK, b"")
                         protocol.send_message(client_socket, ack_message)
