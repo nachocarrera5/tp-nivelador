@@ -7,6 +7,7 @@ import (
 	"os"
 	"errors"
 	"strings"
+	"path/filepath"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
@@ -155,6 +156,13 @@ func (client *Client) Run() error {
 
 	// Con defer me aseguro que el archivo se cierre cuando termine Run
 	defer inputFile.Close()
+
+	// creo el directorio de salida para evitar el error de "open /output/output-1.csv: no such file or directory"
+	outputDirectory := filepath.Dir(client.config.OutputFile)
+	err = os.MkdirAll(outputDirectory, 0755)
+	if err != nil {
+		return err
+	}
 
 	outputFile, err := os.Create(client.config.OutputFile)
 	if err != nil{
