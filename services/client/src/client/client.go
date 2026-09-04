@@ -62,6 +62,10 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
+func (client *Client) Close() error {
+	return client.conn.Close()
+}
+
 func (client *Client) sendBets(bets []string) error {
 
 	betsPayload := make([]string, 0, len(bets))

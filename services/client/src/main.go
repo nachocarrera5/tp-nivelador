@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"os/signal"
+	"syscall"
 
 	client "github.com/7574-sistemas-distribuidos/tp-nivelador/src/client"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
@@ -60,6 +62,11 @@ func loadConfig() (client.ClientConfig, error) {
 }
 
 func run() int {
+
+	sigChan := make(chan os.Signal, 1) // canal para recibir señales del sistema operativo
+	signal.Notify(sigChan, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
 	config, err := loadConfig()
 	if err != nil {
 		logger.Error("load-config", logger.Fail, "err", err)
@@ -72,11 +79,29 @@ func run() int {
 		return 1
 	}
 
-	if err := client.Run(); err != nil {
-		logger.Error("client-run", logger.Fail, "err", err)
-		return 1
+	clientErrChan := make(chan error, 1)
+	go func() {
+		clientErrChan <- client.Run()
+	}()
+
+	select {
+
+	case err := <-clientErrChan:
+		if err != nil {
+			logger.Error("client-run", logger.Fail, "err", err)
+			return 1
+		}
+		return 0
+
+	case <-sigChan:
+		closeErr := client.Close()
+		if closeErr != nil {
+			logger.Error("client-close", logger.Fail, "err", closeErr)
+		}
+		<-clientErrChan // esperar a que termine el cliente y ejecutar el defer de cerrar la conexion
+		return 0
 	}
-	return 0
+
 }
 
 func main() {

@@ -53,6 +53,13 @@ class Server:
         self.finish_condition = threading.Condition()
         self.lottery_lock = threading.Lock()
 
+        self.shutdown_event = threading.Event()
+        self.server_socket = None
+
+        self.client_sockets = set()
+        self.client_threads = set()
+        self.client_resources_lock = threading.Lock() 
+
     def _handle_bets(self, payload: bytes, current_agency_id):
         bets = deserialize_bets(payload)
 
@@ -117,8 +124,9 @@ class Server:
                                 f"Invalid agency id {finish_agency_id}, expected {agency_id}"
                             )
 
-                        self._wait_for_quorum(finish_agency_id)
-                        # "Deberá esperar a la notificación de un mínimo de agencias para realizar el sorteo."
+                        if self._wait_for_quorum(finish_agency_id) == False:
+                            return
+                        
                         self._send_winners(client_socket, finish_agency_id)
 
                         logger.info(
@@ -139,9 +147,10 @@ class Server:
                     return
 
         except Exception as e:
-            logger.error(
-                action, logger.LogResult.fail, "messages-amount", message_amount
-            )
+            if self.shutdown_event.is_set():
+                return
+            logger.error(action, logger.LogResult.fail, "messages-amount", message_amount)
+            
             raise e
 
     def _wait_for_quorum(self, agency_id: int):
@@ -151,26 +160,70 @@ class Server:
             if len(self.finished_agencies) == self.agency_quorum_min:
                 self.finish_condition.notify_all()
 
-            while len(self.finished_agencies) < self.agency_quorum_min:
+            while (len(self.finished_agencies) < self.agency_quorum_min and self.shutdown_event.is_set() == False):
                 self.finish_condition.wait()
 
+            return not self.shutdown_event.is_set()
+
     def _run_thread(self, client_socket):
-        with client_socket:
+        try:
             self._handle_client(client_socket)
+        finally:
+            client_socket.close()
+            
+            with self.client_resources_lock:
+                self.client_sockets.discard(client_socket)
+                self.client_threads.discard(threading.current_thread())
+
+    def _cleanup_client_resources(self):
+        with self.client_resources_lock: # los tengo que copiar para liberar el lock antes de cerrar los sockets y hacer join a los threads, porque si no, se me hace un deadlock
+            client_sockets_copy = list(self.client_sockets)
+            client_threads_copy = list(self.client_threads)
+
+        for client_socket in client_sockets_copy:
+            try:
+                client_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+            client_socket.close()
+
+        for thread in client_threads_copy:
+            thread.join()
+    
+    def shutdown(self):
+        self.shutdown_event.set()
+
+        with self.finish_condition:
+            self.finish_condition.notify_all()
+
+        if self.server_socket is not None:
+            self.server_socket.close()
 
     def run(self):
         action = "accept-connection"
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+            self.server_socket = server_socket
             server_socket.bind((self.server_host, self.server_port))
             server_socket.listen()
-            while True:
+            while self.shutdown_event.is_set() == False:
                 try:
                     logger.info(action, logger.LogResult.in_progress)
                     client_socket, _ = server_socket.accept()
-                except Exception as e:
+                except OSError as e:
+                    if self.shutdown_event.is_set():
+                        break
+
                     logger.error(action, logger.LogResult.fail)
                     raise e
                 logger.info(action, logger.LogResult.success)
 
                 thread = threading.Thread(target=self._run_thread, args=(client_socket,))
+
+                with self.client_resources_lock:
+                    self.client_sockets.add(client_socket)
+                    self.client_threads.add(thread)
+
                 thread.start()
+
+        self._cleanup_client_resources()
