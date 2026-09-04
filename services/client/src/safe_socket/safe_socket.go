@@ -23,21 +23,21 @@ func RecvAll(socket io.Reader, size int) ([]byte, error) {
 	buff := make([]byte, size)
 
 	readCount := 0
-	
+
 	// leo hasta alcanzar los bytes que quiere la funcion
 	for readCount < size {
 
 		n, err := socket.Read(buff[readCount:])
-		
+
 		readCount += n
- 
+
 		if err != nil {
 			if err == io.EOF && readCount == size { // termine de leer
 				return buff, nil
 			}
 			return nil, err
 		}
-	
+
 	}
 	return buff, nil
 }

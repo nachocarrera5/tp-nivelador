@@ -1,13 +1,13 @@
 package client
 
 import (
-	"net"
-	"time"
 	"bufio"
-	"os"
 	"errors"
-	"strings"
+	"net"
+	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
@@ -20,9 +20,9 @@ type ClientConfig struct {
 	ServerHost string
 	ServerPort string
 	AgencyId   string
-	InputFile string
+	InputFile  string
 	OutputFile string
-	BatchSize int
+	BatchSize  int
 }
 
 type Client struct {
@@ -91,7 +91,7 @@ func (client *Client) sendBets(bets []string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if response.Type == protocol.TypeError {
 		return errors.New(string(response.Payload))
 	}
@@ -113,7 +113,7 @@ func (client *Client) sendFinish() error {
 
 }
 
-func (client *Client) recvWinners(writer *bufio.Writer) error{
+func (client *Client) recvWinners(writer *bufio.Writer) error {
 	finished := false
 
 	for !finished {
@@ -140,7 +140,7 @@ func (client *Client) recvWinners(writer *bufio.Writer) error{
 
 		case protocol.TypeError:
 			return errors.New(string(message.Payload))
-			
+
 		default:
 			return errors.New("unexpected message type: " + string(message.Type))
 		}
@@ -169,7 +169,7 @@ func (client *Client) Run() error {
 	}
 
 	outputFile, err := os.Create(client.config.OutputFile)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 	defer outputFile.Close()

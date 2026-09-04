@@ -7,14 +7,13 @@ import (
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
 )
 
-
 const (
-	TypeBet byte = 'B'
-	TypeAck byte = 'A'
+	TypeBet    byte = 'B'
+	TypeAck    byte = 'A'
 	TypeFinish byte = 'F'
 	TypeWinner byte = 'W'
-	TypeEnd byte = 'E'
-	TypeError byte = 'X'
+	TypeEnd    byte = 'E'
+	TypeError  byte = 'X'
 )
 
 const HEADER_SIZE = 9
@@ -22,7 +21,7 @@ const MAX_PAYLOAD_SIZE = 99999999
 
 // 1 byte de tipo + 8 bytes de longitud + payload
 type Message struct {
-	Type byte
+	Type    byte
 	Payload []byte
 }
 
@@ -46,7 +45,7 @@ func SendMessage(socket io.Writer, message Message) error {
 
 	lengthFill := fmt.Sprintf("%08d", len(message.Payload)) // para convertir a 8 digitos
 
-	preparedMessage := make([]byte, 0, HEADER_SIZE + len(message.Payload))
+	preparedMessage := make([]byte, 0, HEADER_SIZE+len(message.Payload))
 
 	preparedMessage = append(preparedMessage, message.Type)
 	preparedMessage = append(preparedMessage, []byte(lengthFill)...)

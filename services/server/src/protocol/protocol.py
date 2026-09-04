@@ -19,10 +19,12 @@ VALID_TYPES = [
     TYPE_ERROR,
 ]
 
+
 class Message:
     def __init__(self, message_type: bytes, payload: bytes):
         self.type = message_type
         self.payload = payload
+
 
 def send_message(socket, message: Message):
 
@@ -31,7 +33,9 @@ def send_message(socket, message: Message):
 
     payload_size = len(message.payload)
     if payload_size > MAX_PAYLOAD_SIZE:
-        raise ValueError(f"Payload size {payload_size} exceeds maximum {MAX_PAYLOAD_SIZE}")
+        raise ValueError(
+            f"Payload size {payload_size} exceeds maximum {MAX_PAYLOAD_SIZE}"
+        )
 
     header = message.type + str(payload_size).zfill(8).encode()
 
