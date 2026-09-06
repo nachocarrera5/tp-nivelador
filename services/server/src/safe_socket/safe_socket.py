@@ -1,6 +1,6 @@
 import socket
 
-# TODO: Complete with a short-read/short-write tolerant implementation
+
 
 
 def recv_all(socket: socket.socket, size):
